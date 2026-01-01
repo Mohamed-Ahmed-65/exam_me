@@ -45,7 +45,7 @@ export default function SubTasksView({ exam, onBack }: SubTasksViewProps) {
   const dragItem = useRef<number | null>(null);
   const dragOverItem = useRef<number | null>(null);
 
-  // Fetch data
+  // Fetch data & Subscribe to changes
   useEffect(() => {
     if (user && exam) {
       const fetchData = async () => {
@@ -74,6 +74,62 @@ export default function SubTasksView({ exam, onBack }: SubTasksViewProps) {
       };
 
       fetchData();
+
+      // Realtime Subscriptions
+      const tasksChannel = supabase
+        .channel(`exam-subtasks-${exam.id}`)
+        .on('postgres_changes', { 
+          event: '*', 
+          schema: 'public', 
+          table: 'exam_subtasks',
+          filter: `exam_id=eq.${exam.id}` 
+        }, (payload) => {
+          if (payload.eventType === 'INSERT') {
+            const newTask = {
+              id: payload.new.id,
+              text: payload.new.text,
+              completed: payload.new.completed,
+              tagId: payload.new.tag_id
+            };
+            setTasks(prev => {
+              if (prev.find(t => t.id === newTask.id)) return prev;
+              return [newTask, ...prev];
+            });
+          } else if (payload.eventType === 'UPDATE') {
+            setTasks(prev => prev.map(t => t.id === payload.new.id ? {
+              ...t,
+              text: payload.new.text,
+              completed: payload.new.completed,
+              tagId: payload.new.tag_id
+            } : t));
+          } else if (payload.eventType === 'DELETE') {
+            setTasks(prev => prev.filter(t => t.id !== payload.old.id));
+          }
+        })
+        .subscribe();
+
+      const tagsChannel = supabase
+        .channel('exam-tags-sync')
+        .on('postgres_changes', { 
+          event: '*', 
+          schema: 'public', 
+          table: 'tags',
+          filter: `user_id=eq.${user.id}`
+        }, (payload) => {
+          if (payload.eventType === 'INSERT') {
+            setTags(prev => [...prev, payload.new as Tag]);
+          } else if (payload.eventType === 'UPDATE') {
+            setTags(prev => prev.map(t => t.id === payload.new.id ? payload.new as Tag : t));
+          } else if (payload.eventType === 'DELETE') {
+            setTags(prev => prev.filter(t => t.id !== payload.old.id));
+          }
+        })
+        .subscribe();
+
+      return () => {
+        tasksChannel.unsubscribe();
+        tagsChannel.unsubscribe();
+      };
     }
   }, [user, exam]);
 

@@ -41,7 +41,7 @@ export default function PomodoroTimer() {
 
   const accentColor = COLORS.find(c => c.id === accentColorId) || COLORS[0];
 
-  // Fetch settings from Supabase
+  // Fetch settings from Supabase & Subscribe to changes
   useEffect(() => {
     if (user) {
       const fetchSettings = async () => {
@@ -67,18 +67,46 @@ export default function PomodoroTimer() {
       };
 
       fetchSettings();
+
+      // Subscribe to profile changes (settings & theme)
+      const channel = supabase
+        .channel(`profile-sync-${user.id}`)
+        .on('postgres_changes', {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'profiles',
+          filter: `id=eq.${user.id}`
+        }, (payload: any) => {
+          const settings = payload.new.pomodoro_settings;
+          if (settings) {
+            setWorkDuration(settings.work);
+            setBreakDuration(settings.break);
+            setAccentColorId(settings.color);
+          }
+        })
+        .subscribe();
+
+      return () => {
+        channel.unsubscribe();
+      };
     }
   }, [user]);
 
   // Synchronize internal timeLeft with targetEndTime or remainingWhenPaused
   useEffect(() => {
+    let interval: number;
+
     const updateTimer = () => {
       if (isActive && targetEndTime) {
         const now = Date.now();
-        const diff = Math.max(0, Math.round((targetEndTime - now) / 1000));
-        setTimeLeft(diff);
+        const diff = Math.max(0, Math.ceil((targetEndTime - now) / 1000));
+        
+        setTimeLeft((prev) => {
+          if (prev !== diff) return diff;
+          return prev;
+        });
 
-        if (diff === 0) {
+        if (diff <= 0) {
           handleTimerEnd();
         }
       } else {
@@ -87,7 +115,7 @@ export default function PomodoroTimer() {
     };
 
     updateTimer();
-    const interval = window.setInterval(updateTimer, 1000);
+    interval = window.setInterval(updateTimer, 500); // 500ms for smoother detection
     return () => clearInterval(interval);
   }, [isActive, targetEndTime, remainingWhenPaused]);
 

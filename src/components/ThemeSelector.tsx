@@ -45,10 +45,10 @@ export default function ThemeSelector() {
   };
 
   return (
-    <div className="fixed bottom-6 left-6 z-50">
+    <div className="fixed bottom-32 sm:bottom-6 left-6 z-[60]">
       <button
         onClick={() => setIsOpen(!isOpen)}
-        className="w-12 h-12 bg-slate-900 border border-slate-800 rounded-2xl flex items-center justify-center text-slate-400 hover:text-white hover:border-brand transition-all shadow-2xl group"
+        className="w-12 h-12 bg-slate-900 border border-slate-800 rounded-2xl flex items-center justify-center text-slate-400 hover:text-white hover:border-brand transition-all shadow-2xl group shadow-brand/10"
       >
         <Palette className={twMerge("w-6 h-6 transition-transform", isOpen && "rotate-12 scale-110")} />
         

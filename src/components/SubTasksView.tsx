@@ -1,6 +1,7 @@
-import { useState, useRef } from 'react';
-import { ArrowRight, Plus, CheckCircle2, Circle, Trash2, List, GripVertical, X, Edit2, Check } from 'lucide-react';
-import { useLocalStorage } from '../hooks/useLocalStorage';
+import { useState, useRef, useEffect } from 'react';
+import { ArrowRight, Plus, CheckCircle2, Circle, Trash2, List, GripVertical, X, Edit2, Check, Loader2 } from 'lucide-react';
+import { supabase } from '../lib/supabase';
+import { useAuth } from '../context/AuthContext';
 import type { Exam } from '../data/exams';
 import { twMerge } from 'tailwind-merge';
 
@@ -17,10 +18,6 @@ interface SubTask {
   tagId?: string;
 }
 
-interface SubTaskData {
-  [examId: string]: SubTask[];
-}
-
 interface SubTasksViewProps {
   exam: Exam;
   onBack: () => void;
@@ -32,12 +29,10 @@ const TAG_COLORS = [
 ];
 
 export default function SubTasksView({ exam, onBack }: SubTasksViewProps) {
-  const [subTasksStore, setSubTasksStore] = useLocalStorage<SubTaskData>('exam-subtasks', {});
-  const [tags, setTags] = useLocalStorage<Tag[]>('exam-shared-tags', [
-    { id: 'st1', name: 'مراجعة', color: 'bg-blue-500' },
-    { id: 'st2', name: 'حل أسئلة', color: 'bg-emerald-500' },
-    { id: 'st3', name: 'قراءة', color: 'bg-amber-500' },
-  ]);
+  const { user } = useAuth();
+  const [tasks, setTasks] = useState<SubTask[]>([]);
+  const [tags, setTags] = useState<Tag[]>([]);
+  const [loading, setLoading] = useState(true);
 
   const [newSubTask, setNewSubTask] = useState('');
   const [selectedTagId, setSelectedTagId] = useState<string | undefined>();
@@ -50,40 +45,101 @@ export default function SubTasksView({ exam, onBack }: SubTasksViewProps) {
   const dragItem = useRef<number | null>(null);
   const dragOverItem = useRef<number | null>(null);
 
-  const tasks = subTasksStore[exam.id] || [];
+  // Fetch data
+  useEffect(() => {
+    if (user && exam) {
+      const fetchData = async () => {
+        try {
+          const [tasksRes, tagsRes] = await Promise.all([
+            supabase.from('exam_subtasks').select('*').eq('user_id', user.id).eq('exam_id', exam.id).order('created_at', { ascending: false }),
+            supabase.from('tags').select('*').eq('user_id', user.id).eq('type', 'exam')
+          ]);
 
-  const addSubTask = (e: React.FormEvent) => {
+          if (tasksRes.error) throw tasksRes.error;
+          if (tagsRes.error) throw tagsRes.error;
+
+          setTasks(tasksRes.data.map(t => ({
+            id: t.id,
+            text: t.text,
+            completed: t.completed,
+            tagId: t.tag_id
+          })));
+
+          setTags(tagsRes.data);
+        } catch (err) {
+          console.error('Error fetching subtasks:', err);
+        } finally {
+          setLoading(false);
+        }
+      };
+
+      fetchData();
+    }
+  }, [user, exam]);
+
+  const addSubTask = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newSubTask.trim()) return;
+    if (!newSubTask.trim() || !user) return;
 
+    const tempId = crypto.randomUUID();
     const newTask: SubTask = {
-      id: crypto.randomUUID(),
+      id: tempId,
       text: newSubTask.trim(),
       completed: false,
       tagId: selectedTagId
     };
 
-    setSubTasksStore(prev => ({
-      ...prev,
-      [exam.id]: [newTask, ...(prev[exam.id] || [])]
-    }));
+    // Optimistic Update
+    setTasks([newTask, ...tasks]);
     setNewSubTask('');
+
+    const { data, error } = await supabase.from('exam_subtasks').insert({
+      user_id: user.id,
+      exam_id: exam.id,
+      text: newTask.text,
+      completed: false,
+      tag_id: newTask.tagId
+    }).select().single();
+
+    if (error) {
+      console.error('Error adding subtask:', error);
+      setTasks(tasks.filter(t => t.id !== tempId));
+    } else if (data) {
+      setTasks(prev => prev.map(t => t.id === tempId ? { ...t, id: data.id } : t));
+    }
   };
 
-  const toggleTask = (taskId: string) => {
-    setSubTasksStore(prev => ({
-      ...prev,
-      [exam.id]: (prev[exam.id] || []).map(t => 
-        t.id === taskId ? { ...t, completed: !t.completed } : t
-      )
-    }));
+  const toggleTask = async (taskId: string) => {
+    const task = tasks.find(t => t.id === taskId);
+    if (!task) return;
+
+    const newStatus = !task.completed;
+    setTasks(tasks.map(t => t.id === taskId ? { ...t, completed: newStatus } : t));
+
+    const { error } = await supabase
+      .from('exam_subtasks')
+      .update({ completed: newStatus })
+      .eq('id', taskId);
+
+    if (error) {
+      console.error('Error toggling subtask:', error);
+      setTasks(tasks.map(t => t.id === taskId ? { ...t, completed: !newStatus } : t));
+    }
   };
 
-  const deleteTask = (taskId: string) => {
-    setSubTasksStore(prev => ({
-      ...prev,
-      [exam.id]: (prev[exam.id] || []).filter(t => t.id !== taskId)
-    }));
+  const deleteTask = async (taskId: string) => {
+    const backup = [...tasks];
+    setTasks(tasks.filter(t => t.id !== taskId));
+
+    const { error } = await supabase
+      .from('exam_subtasks')
+      .delete()
+      .eq('id', taskId);
+
+    if (error) {
+      console.error('Error deleting subtask:', error);
+      setTasks(backup);
+    }
   };
 
   const startEditing = (task: SubTask) => {
@@ -91,26 +147,42 @@ export default function SubTasksView({ exam, onBack }: SubTasksViewProps) {
     setEditingText(task.text);
   };
 
-  const saveEdit = (taskId: string) => {
-    setSubTasksStore(prev => ({
-      ...prev,
-      [exam.id]: (prev[exam.id] || []).map(t => 
-        t.id === taskId ? { ...t, text: editingText.trim() } : t
-      )
-    }));
+  const saveEdit = async (taskId: string) => {
+    const backupText = tasks.find(t => t.id === taskId)?.text || '';
+    setTasks(tasks.map(t => t.id === taskId ? { ...t, text: editingText.trim() } : t));
     setEditingTaskId(null);
+
+    const { error } = await supabase
+      .from('exam_subtasks')
+      .update({ text: editingText.trim() })
+      .eq('id', taskId);
+
+    if (error) {
+      console.error('Error saving subtask edit:', error);
+      setTasks(tasks.map(t => t.id === taskId ? { ...t, text: backupText } : t));
+    }
   };
 
-  const addTag = () => {
-    if (!newTagName.trim()) return;
-    const newTag: Tag = {
-      id: crypto.randomUUID(),
+  const addTag = async () => {
+    if (!newTagName.trim() || !user) return;
+    
+    const { data, error } = await supabase.from('tags').insert({
+      user_id: user.id,
       name: newTagName.trim(),
-      color: newTagColor
-    };
-    setTags([...tags, newTag]);
-    setNewTagName('');
-    setIsAddingTag(false);
+      color: newTagColor,
+      type: 'exam'
+    }).select().single();
+
+    if (error) {
+      console.error('Error adding tag:', error);
+      return;
+    }
+
+    if (data) {
+      setTags([...tags, data]);
+      setNewTagName('');
+      setIsAddingTag(false);
+    }
   };
 
   // Reordering logic
@@ -121,15 +193,23 @@ export default function SubTasksView({ exam, onBack }: SubTasksViewProps) {
     _tasks.splice(dragOverItem.current, 0, draggedItemContent);
     dragItem.current = null;
     dragOverItem.current = null;
-    setSubTasksStore(prev => ({ ...prev, [exam.id]: _tasks }));
+    setTasks(_tasks);
   };
 
   const completedCount = tasks.filter(t => t.completed).length;
   const progress = tasks.length > 0 ? (completedCount / tasks.length) * 100 : 0;
 
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-slate-950 flex items-center justify-center">
+        <Loader2 className="w-8 h-8 text-blue-500 animate-spin" />
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-slate-950 text-slate-50 pb-24">
-      <div className="max-w-3xl mx-auto px-4 py-8 space-y-8 animate-in slide-in-from-left duration-500">
+      <div className="max-w-3xl mx-auto px-4 py-8 sm:py-12 space-y-8 sm:space-y-12 animate-in slide-in-from-left duration-500">
         
         {/* Header */}
         <div className="flex items-center gap-4">
@@ -163,7 +243,7 @@ export default function SubTasksView({ exam, onBack }: SubTasksViewProps) {
           </div>
           <div className="h-2 bg-slate-800 rounded-full overflow-hidden">
             <div 
-              className="h-full bg-blue-500 transition-all duration-500" 
+              className="h-full bg-blue-500 transition-all duration-500 shadow-[0_0_10px_rgba(59,130,246,0.5)]" 
               style={{ width: `${progress}%` }}
             />
           </div>
@@ -177,7 +257,7 @@ export default function SubTasksView({ exam, onBack }: SubTasksViewProps) {
                 value={newSubTask}
                 onChange={(e) => setNewSubTask(e.target.value)}
                 placeholder="أضف مهمة جديدة لهذه المادة..."
-                className="w-full bg-slate-900 border border-slate-800 focus:border-blue-500/50 focus:ring-1 focus:ring-blue-500/20 rounded-xl px-6 py-4 outline-none transition-all placeholder:text-slate-600 shadow-lg"
+                className="w-full bg-slate-900 border border-slate-800 focus:border-blue-500/50 focus:ring-1 focus:ring-blue-500/20 rounded-xl px-6 py-4 outline-none transition-all placeholder:text-slate-600 shadow-lg shadow-inner"
             />
             <button
                 type="submit"
@@ -198,7 +278,7 @@ export default function SubTasksView({ exam, onBack }: SubTasksViewProps) {
                             "px-3 py-1.5 rounded-lg text-[10px] font-bold transition-all border flex items-center gap-2",
                             selectedTagId === tag.id 
                             ? `${tag.color} text-white border-white/20 shadow-lg` 
-                            : "bg-slate-900 text-slate-500 border-slate-800 hover:border-slate-700"
+                            : "bg-slate-900 text-slate-500 border-slate-800 hover:border-slate-700 shadow-sm"
                         )}
                     >
                         <div className={twMerge("w-1.5 h-1.5 rounded-full", tag.color, "bg-white/50")} />
@@ -226,11 +306,11 @@ export default function SubTasksView({ exam, onBack }: SubTasksViewProps) {
                             value={newTagName}
                             onChange={(e) => setNewTagName(e.target.value)}
                             placeholder="اسم التاغ..."
-                            className="flex-1 bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-sm outline-none"
+                            className="flex-1 bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-sm outline-none shadow-inner"
                         />
                         <button 
                             onClick={addTag}
-                            className="px-4 py-2 bg-blue-600 text-white rounded-lg text-xs font-bold hover:bg-blue-500 transition-all"
+                            className="px-4 py-2 bg-blue-600 text-white rounded-lg text-xs font-bold hover:bg-blue-500 transition-all shadow-lg active:scale-95"
                         >
                             إضافة
                         </button>
@@ -243,7 +323,7 @@ export default function SubTasksView({ exam, onBack }: SubTasksViewProps) {
                                 className={twMerge(
                                     "w-6 h-6 rounded-full border-2 transition-all",
                                     c,
-                                    newTagColor === c ? "border-white scale-110" : "border-transparent"
+                                    newTagColor === c ? "border-white scale-110 shadow-lg" : "border-transparent"
                                 )}
                             />
                         ))}
@@ -255,7 +335,7 @@ export default function SubTasksView({ exam, onBack }: SubTasksViewProps) {
         {/* Tasks List */}
         <div className="space-y-3">
           {tasks.length === 0 ? (
-            <div className="text-center py-12 bg-slate-900/20 border border-dashed border-slate-800 rounded-2xl">
+            <div className="text-center py-12 bg-slate-900/20 border border-dashed border-slate-800 rounded-2xl animate-in fade-in duration-500">
               <List className="w-12 h-12 text-slate-700 mx-auto mb-4" />
               <p className="text-slate-500">لا توجد مهام مضافة لهذه المادة بعد</p>
             </div>
@@ -276,7 +356,7 @@ export default function SubTasksView({ exam, onBack }: SubTasksViewProps) {
                     "group flex items-center gap-4 p-4 rounded-xl border transition-all duration-300 cursor-grab active:cursor-grabbing",
                     task.completed 
                       ? "bg-slate-900/30 border-slate-800/50 opacity-60" 
-                      : "bg-slate-900 border-slate-800 hover:border-slate-700 hover:bg-slate-900/80"
+                      : "bg-slate-900 border-slate-800 hover:border-slate-700 hover:bg-slate-900/80 shadow-lg hover:shadow-blue-500/5"
                   )}
                 >
                   <div className="text-slate-700 group-hover:text-slate-500 transition-colors shrink-0">
@@ -302,9 +382,9 @@ export default function SubTasksView({ exam, onBack }: SubTasksViewProps) {
                                 value={editingText}
                                 onChange={(e) => setEditingText(e.target.value)}
                                 onKeyDown={(e) => e.key === 'Enter' && saveEdit(task.id)}
-                                className="flex-1 bg-slate-950 border border-blue-500/50 rounded-lg px-2 py-1 text-sm outline-none text-slate-100"
+                                className="flex-1 bg-slate-950 border border-blue-500/50 rounded-lg px-2 py-1 text-sm outline-none text-slate-100 shadow-inner"
                              />
-                             <button onClick={() => saveEdit(task.id)} className="p-1.5 bg-blue-600 rounded-lg text-white"><Check className="w-4 h-4" /></button>
+                             <button onClick={() => saveEdit(task.id)} className="p-1.5 bg-blue-600 rounded-lg text-white shadow-lg active:scale-95"><Check className="w-4 h-4" /></button>
                         </div>
                     ) : (
                         <>

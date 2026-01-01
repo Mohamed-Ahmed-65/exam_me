@@ -1,6 +1,7 @@
-import { useState, useRef } from 'react';
-import { Plus, Trash2, GripVertical, X, CheckCircle2, Circle } from 'lucide-react';
-import { useLocalStorage } from '../hooks/useLocalStorage';
+import { useState, useRef, useEffect } from 'react';
+import { Plus, Trash2, GripVertical, X, CheckCircle2, Circle, Loader2 } from 'lucide-react';
+import { supabase } from '../lib/supabase';
+import { useAuth } from '../context/AuthContext';
 import { twMerge } from 'tailwind-merge';
 
 interface Tag {
@@ -22,11 +23,10 @@ const TAG_COLORS = [
 ];
 
 export default function BrainDump() {
-  const [tasks, setTasks] = useLocalStorage<DumpTask[]>('brain-dump-tasks', []);
-  const [tags, setTags] = useLocalStorage<Tag[]>('brain-dump-tags', [
-    { id: 't1', name: 'عاجل', color: 'bg-rose-500' },
-    { id: 't2', name: 'دراسة', color: 'bg-blue-500' },
-  ]);
+  const { user } = useAuth();
+  const [tasks, setTasks] = useState<DumpTask[]>([]);
+  const [tags, setTags] = useState<Tag[]>([]);
+  const [loading, setLoading] = useState(true);
   
   const [newTaskText, setNewTaskText] = useState('');
   const [selectedTagId, setSelectedTagId] = useState<string | undefined>();
@@ -37,45 +37,138 @@ export default function BrainDump() {
   const dragItem = useRef<number | null>(null);
   const dragOverItem = useRef<number | null>(null);
 
-  const addTask = (e: React.FormEvent) => {
+  // Fetch data from Supabase
+  useEffect(() => {
+    if (user) {
+      const fetchData = async () => {
+        try {
+          const [tasksRes, tagsRes] = await Promise.all([
+            supabase.from('brain_dump_tasks').select('*').eq('user_id', user.id).order('created_at', { ascending: false }),
+            supabase.from('tags').select('*').eq('user_id', user.id).eq('type', 'brain_dump')
+          ]);
+
+          if (tasksRes.error) throw tasksRes.error;
+          if (tagsRes.error) throw tagsRes.error;
+
+          setTasks(tasksRes.data.map(t => ({
+            id: t.id,
+            text: t.text,
+            completed: t.completed,
+            tagId: t.tag_id
+          })));
+
+          setTags(tagsRes.data);
+        } catch (err) {
+          console.error('Error fetching brain dump data:', err);
+        } finally {
+          setLoading(false);
+        }
+      };
+
+      fetchData();
+    }
+  }, [user]);
+
+  const addTask = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newTaskText.trim()) return;
+    if (!newTaskText.trim() || !user) return;
+
+    const tempId = crypto.randomUUID();
     const newTask: DumpTask = {
-      id: crypto.randomUUID(),
+      id: tempId,
       text: newTaskText.trim(),
       completed: false,
       tagId: selectedTagId
     };
+
+    // Optimistic update
     setTasks([newTask, ...tasks]);
     setNewTaskText('');
+
+    const { data, error } = await supabase.from('brain_dump_tasks').insert({
+      user_id: user.id,
+      text: newTask.text,
+      completed: false,
+      tag_id: newTask.tagId
+    }).select().single();
+
+    if (error) {
+      console.error('Error adding task:', error);
+      setTasks(tasks.filter(t => t.id !== tempId));
+    } else if (data) {
+      // Update with real ID from Supabase
+      setTasks(prev => prev.map(t => t.id === tempId ? { ...t, id: data.id } : t));
+    }
   };
 
-  const toggleTask = (id: string) => {
-    setTasks(tasks.map(t => t.id === id ? { ...t, completed: !t.completed } : t));
+  const toggleTask = async (id: string) => {
+    const task = tasks.find(t => t.id === id);
+    if (!task) return;
+
+    const newStatus = !task.completed;
+    
+    // Optimistic update
+    setTasks(tasks.map(t => t.id === id ? { ...t, completed: newStatus } : t));
+
+    const { error } = await supabase
+      .from('brain_dump_tasks')
+      .update({ completed: newStatus })
+      .eq('id', id);
+
+    if (error) {
+      console.error('Error toggling task:', error);
+      setTasks(tasks.map(t => t.id === id ? { ...t, completed: !newStatus } : t));
+    }
   };
 
-  const deleteTask = (id: string) => {
+  const deleteTask = async (id: string) => {
+    const backup = [...tasks];
     setTasks(tasks.filter(t => t.id !== id));
+
+    const { error } = await supabase
+      .from('brain_dump_tasks')
+      .delete()
+      .eq('id', id);
+
+    if (error) {
+      console.error('Error deleting task:', error);
+      setTasks(backup);
+    }
   };
 
-  const addTag = () => {
-    if (!newTagName.trim()) return;
-    const newTag: Tag = {
-      id: crypto.randomUUID(),
+  const addTag = async () => {
+    if (!newTagName.trim() || !user) return;
+    
+    const { data, error } = await supabase.from('tags').insert({
+      user_id: user.id,
       name: newTagName.trim(),
-      color: newTagColor
-    };
-    setTags([...tags, newTag]);
-    setNewTagName('');
-    setIsAddingTag(false);
+      color: newTagColor,
+      type: 'brain_dump'
+    }).select().single();
+
+    if (error) {
+      console.error('Error adding tag:', error);
+      return;
+    }
+
+    if (data) {
+      setTags([...tags, data]);
+      setNewTagName('');
+      setIsAddingTag(false);
+    }
   };
 
-  const deleteTag = (id: string) => {
+  const deleteTag = async (id: string) => {
+    const { error } = await supabase.from('tags').delete().eq('id', id);
+    if (error) {
+      console.error('Error deleting tag:', error);
+      return;
+    }
     setTags(tags.filter(t => t.id !== id));
     setTasks(tasks.map(t => t.tagId === id ? { ...t, tagId: undefined } : t));
   };
 
-  // Reordering logic
+  // Reordering logic (Keep local only for now, or add sort_order column to DB later)
   const handleSort = () => {
     if (dragItem.current === null || dragOverItem.current === null) return;
     const _tasks = [...tasks];
@@ -86,8 +179,16 @@ export default function BrainDump() {
     setTasks(_tasks);
   };
 
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-full">
+        <Loader2 className="w-6 h-6 text-blue-500 animate-spin" />
+      </div>
+    );
+  }
+
   return (
-    <div className="flex flex-col h-full bg-slate-900/50 backdrop-blur-xl border-l border-slate-800 p-6 animate-in slide-in-from-right duration-500">
+    <div className="flex flex-col h-full bg-slate-900/90 lg:bg-slate-900/50 backdrop-blur-3xl border-l border-slate-800 p-6 animate-in slide-in-from-right duration-500 shadow-2xl lg:shadow-none">
       <div className="flex items-center justify-between mb-8">
         <h2 className="text-2xl font-bold text-slate-100 flex items-center gap-3">
           <span className="p-2 bg-blue-500/10 rounded-xl text-blue-400">
@@ -105,7 +206,7 @@ export default function BrainDump() {
             value={newTaskText}
             onChange={(e) => setNewTaskText(e.target.value)}
             placeholder="اكتب ما يدور في ذهنك..."
-            className="w-full bg-slate-950/50 border border-slate-800 focus:border-blue-500/50 rounded-2xl px-5 py-4 outline-none transition-all placeholder:text-slate-600"
+            className="w-full bg-slate-950/50 border border-slate-800 focus:border-blue-500/50 rounded-2xl px-5 py-4 outline-none transition-all placeholder:text-slate-600 shadow-inner"
           />
           <button
             type="submit"
@@ -126,7 +227,7 @@ export default function BrainDump() {
                 "group relative px-3 py-1.5 rounded-lg text-xs font-bold transition-all border flex items-center gap-2",
                 selectedTagId === tag.id 
                   ? `${tag.color} text-white border-white/20 shadow-lg` 
-                  : "bg-slate-800 text-slate-400 border-transparent hover:bg-slate-700"
+                  : "bg-slate-800 text-slate-400 border-transparent hover:bg-slate-700 shadow-sm"
               )}
             >
               <div className={twMerge("w-1.5 h-1.5 rounded-full", tag.color, "bg-white/50")} />
@@ -156,7 +257,7 @@ export default function BrainDump() {
 
       {/* Tags Manager UI (Hidden modal-like) */}
       {isAddingTag && (
-        <div className="mb-8 p-4 bg-slate-950/50 border border-slate-800 rounded-2xl animate-in zoom-in-95 duration-200">
+        <div className="mb-8 p-4 bg-slate-950/50 border border-slate-800 rounded-2xl animate-in zoom-in-95 duration-200 shadow-2xl">
           <div className="flex justify-between mb-4">
             <span className="text-xs font-bold text-slate-400">إنشاء تاغ جديد</span>
             <button onClick={() => setIsAddingTag(false)}><X className="w-4 h-4 text-slate-500" /></button>
@@ -166,7 +267,7 @@ export default function BrainDump() {
             value={newTagName}
             onChange={(e) => setNewTagName(e.target.value)}
             placeholder="اسم التاغ..."
-            className="w-full bg-slate-900 border border-slate-800 rounded-lg px-3 py-2 text-sm mb-3 outline-none"
+            className="w-full bg-slate-900 border border-slate-800 rounded-lg px-3 py-2 text-sm mb-3 outline-none shadow-inner"
           />
           <div className="flex gap-2 mb-4">
             {TAG_COLORS.map(c => (
@@ -176,14 +277,14 @@ export default function BrainDump() {
                 className={twMerge(
                   "w-6 h-6 rounded-full border-2 transition-all",
                   c,
-                  newTagColor === c ? "border-white scale-110" : "border-transparent"
+                  newTagColor === c ? "border-white scale-110 shadow-lg" : "border-transparent"
                 )}
               />
             ))}
           </div>
           <button 
             onClick={addTag}
-            className="w-full py-2 bg-slate-100 text-slate-900 rounded-lg text-xs font-bold hover:bg-white transition-all"
+            className="w-full py-2 bg-slate-100 text-slate-900 rounded-lg text-xs font-bold hover:bg-white transition-all shadow-lg active:scale-95"
           >
             إضافة التاغ
           </button>
@@ -206,7 +307,7 @@ export default function BrainDump() {
                 "group flex items-center gap-4 p-4 rounded-2xl border transition-all cursor-grab active:cursor-grabbing",
                 task.completed 
                   ? "bg-slate-900/40 border-slate-800/50 opacity-60" 
-                  : "bg-slate-950/50 border-slate-800 hover:border-slate-700 hover:bg-slate-900/80"
+                  : "bg-slate-950/50 border-slate-800 hover:border-slate-700 hover:bg-slate-900/80 shadow-lg hover:shadow-blue-500/5"
               )}
             >
               <div className="text-slate-600 group-hover:text-slate-400 transition-colors shrink-0">
@@ -249,11 +350,11 @@ export default function BrainDump() {
         })}
 
         {tasks.length === 0 && (
-          <div className="text-center py-12 border-2 border-dashed border-slate-800/50 rounded-3xl">
-            <div className="w-12 h-12 bg-slate-900 rounded-2xl flex items-center justify-center mx-auto mb-4">
+          <div className="text-center py-12 border-2 border-dashed border-slate-800/50 rounded-3xl animate-in fade-in duration-500">
+            <div className="w-12 h-12 bg-slate-900 rounded-2xl flex items-center justify-center mx-auto mb-4 border border-slate-800">
               <Plus className="w-6 h-6 text-slate-700" />
             </div>
-            <p className="text-slate-500 text-sm">أفرغ ما في رأسك هنا لتركز في دراستك</p>
+            <p className="text-slate-500 text-sm italic">أفرغ ما في رأسك هنا لتركز في دراستك</p>
           </div>
         )}
       </div>

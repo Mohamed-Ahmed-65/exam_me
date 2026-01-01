@@ -1,53 +1,197 @@
 import { useState, useEffect } from 'react';
-import { useLocalStorage } from './hooks/useLocalStorage';
+import { supabase } from './lib/supabase';
 import type { Stream, Exam } from './data/exams';
 import StreamSelector from './components/StreamSelector';
 import Dashboard from './components/Dashboard';
 import SubTasksView from './components/SubTasksView';
 import PomodoroTimer from './components/PomodoroTimer';
+import Auth from './components/Auth';
+import BrainDump from './components/BrainDump';
+import { useAuth } from './context/AuthContext';
+import { LogOut, Loader2, Brain, X } from 'lucide-react';
+import { twMerge } from 'tailwind-merge';
 
 function App() {
-  const [stream, setStream] = useLocalStorage<Stream | null>('selected-stream', null);
+  const { user, loading: authLoading, signOut } = useAuth();
+  const [stream, setStream] = useState<Stream | null>(null);
   const [activeView, setActiveView] = useState<'dashboard' | 'subtasks'>('dashboard');
   const [selectedExam, setSelectedExam] = useState<Exam | null>(null);
+  const [isBrainDumpOpen, setIsBrainDumpOpen] = useState(false);
   const [mounted, setMounted] = useState(false);
+  const [profileLoading, setProfileLoading] = useState(true);
 
   useEffect(() => {
     setMounted(true);
   }, []);
 
-  if (!mounted) return null;
+  // Fetch or create profile and handle migration
+  useEffect(() => {
+    if (user && mounted) {
+      const initProfileAndMigrate = async () => {
+        try {
+          const { data, error } = await supabase
+            .from('profiles')
+            .select('selected_stream')
+            .eq('id', user.id)
+            .maybeSingle();
 
-  if (!stream) {
-    return <StreamSelector onSelect={(s) => setStream(s)} />;
+          if (error) throw error;
+
+          if (!data) {
+            // First time login - Perform Migration
+            console.log('Performing one-time data migration...');
+            
+            // 1. Initialize profile
+            await supabase.from('profiles').insert({ 
+              id: user.id,
+              country: user.user_metadata?.country || 'Unknown'
+            });
+
+            // 2. Migrate Tags
+            const localExamTags = JSON.parse(localStorage.getItem('exam-shared-tags') || '[]');
+            const localDumpTags = JSON.parse(localStorage.getItem('brain-dump-tags') || '[]');
+            
+            if (localExamTags.length || localDumpTags.length) {
+              const allTags = [
+                ...localExamTags.map((t: any) => ({ user_id: user.id, name: t.name, color: t.color, type: 'exam' })),
+                ...localDumpTags.map((t: any) => ({ user_id: user.id, name: t.name, color: t.color, type: 'brain_dump' }))
+              ];
+              await supabase.from('tags').insert(allTags);
+            }
+
+            // 3. Migrate Brain Dump Tasks
+            const localDumpTasks = JSON.parse(localStorage.getItem('brain-dump-tasks') || '[]');
+            if (localDumpTasks.length) {
+              await supabase.from('brain_dump_tasks').insert(
+                localDumpTasks.map((t: any) => ({
+                  user_id: user.id,
+                  text: t.text,
+                  completed: t.completed
+                }))
+              );
+            }
+
+            // 4. Migrate Subtasks
+            const localSubtasks = JSON.parse(localStorage.getItem('exam-subtasks') || '{}');
+            const subtaskEntries: any[] = [];
+            Object.entries(localSubtasks).forEach(([examId, tasks]: [string, any]) => {
+              (tasks as any[]).forEach((t: any) => {
+                subtaskEntries.push({
+                  user_id: user.id,
+                  exam_id: examId,
+                  text: t.text,
+                  completed: t.completed
+                });
+              });
+            });
+            if (subtaskEntries.length) {
+              await supabase.from('exam_subtasks').insert(subtaskEntries);
+            }
+            
+            setStream(null);
+          } else {
+            setStream(data.selected_stream as Stream);
+          }
+        } catch (err) {
+          console.error('Error in profile/migration init:', err);
+        } finally {
+          setProfileLoading(false);
+        }
+      };
+      initProfileAndMigrate();
+    } else if (!authLoading) {
+      setProfileLoading(false);
+    }
+  }, [user, mounted, authLoading]);
+
+  const handleStreamSelect = async (s: Stream) => {
+    setStream(s);
+    if (user) {
+      await supabase.from('profiles').update({ selected_stream: s }).eq('id', user.id);
+    }
+  };
+
+  if (!mounted || authLoading || (user && profileLoading)) {
+    return (
+      <div className="min-h-screen bg-slate-950 flex items-center justify-center">
+        <Loader2 className="w-8 h-8 text-blue-500 animate-spin" />
+      </div>
+    );
   }
 
-  // Handle case where old stream might be stored in localStorage
+  if (!user) {
+    return <Auth />;
+  }
+
+  if (!stream) {
+    return <StreamSelector onSelect={handleStreamSelect} />;
+  }
+
   if (stream !== 'scientific') {
-    setStream(null);
+    handleStreamSelect(null as any);
     return null;
   }
 
-  const handleOpenSubTasks = (exam: Exam) => {
-    setSelectedExam(exam);
-    setActiveView('subtasks');
-    window.scrollTo({ top: 0, behavior: 'smooth' });
-  };
-
-  const handleBackToDashboard = () => {
-    setActiveView('dashboard');
-    setSelectedExam(null);
-  };
-
   return (
-    <>
-      {activeView === 'subtasks' && selectedExam ? (
-        <SubTasksView exam={selectedExam} onBack={handleBackToDashboard} />
-      ) : (
-        <Dashboard stream={stream} onOpenSubTasks={handleOpenSubTasks} />
+    <div className="min-h-screen bg-slate-950 flex flex-col lg:flex-row-reverse">
+      {/* Side Actions (Logout & Toggle) */}
+      <div className="fixed top-4 left-4 z-50 flex gap-2">
+        <button 
+          onClick={() => signOut()}
+          className="p-2 bg-slate-900/50 backdrop-blur-md border border-slate-800 rounded-xl text-slate-400 hover:text-white transition-all group shadow-xl"
+          title="تسجيل الخروج"
+        >
+          <LogOut className="w-5 h-5 group-hover:-translate-x-1 transition-transform" />
+        </button>
+        <button 
+          onClick={() => setIsBrainDumpOpen(!isBrainDumpOpen)}
+          className="lg:hidden p-2 bg-blue-600 border border-blue-500 rounded-xl text-white transition-all shadow-xl hover:bg-blue-500"
+          title="افتح المسودة"
+        >
+          {isBrainDumpOpen ? <X className="w-5 h-5" /> : <Brain className="w-5 h-5" />}
+        </button>
+      </div>
+
+      {/* Main Content Area */}
+      <main className="flex-1 w-full lg:pr-[350px] xl:pr-[400px]">
+        {activeView === 'subtasks' && selectedExam ? (
+          <SubTasksView 
+            exam={selectedExam} 
+            onBack={() => {
+              setActiveView('dashboard');
+              setSelectedExam(null);
+            }} 
+          />
+        ) : (
+          <Dashboard 
+            stream={stream} 
+            onOpenSubTasks={(exam) => {
+              setSelectedExam(exam);
+              setActiveView('subtasks');
+              window.scrollTo({ top: 0, behavior: 'smooth' });
+            }} 
+          />
+        )}
+      </main>
+
+      {/* Right Sidebar (Brain Dump) */}
+      <aside className={twMerge(
+        "fixed inset-y-0 right-0 z-40 w-[85%] sm:w-[50%] lg:w-[350px] xl:w-[400px] transition-transform duration-500 transform lg:translate-x-0",
+        isBrainDumpOpen ? "translate-x-0" : "translate-x-full"
+      )}>
+        <BrainDump />
+      </aside>
+
+      {/* Overlay for mobile Brain Dump */}
+      {isBrainDumpOpen && (
+        <div 
+          className="fixed inset-0 bg-slate-950/60 backdrop-blur-sm z-30 lg:hidden"
+          onClick={() => setIsBrainDumpOpen(false)}
+        />
       )}
+
       <PomodoroTimer />
-    </>
+    </div>
   );
 }
 

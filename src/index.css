@@ -8,6 +8,49 @@
 @layer base {
   body {
     font-family: var(--font-sans);
-    @apply bg-slate-950 text-slate-50;
+    @apply bg-slate-950 text-slate-50 antialiased overflow-x-hidden;
+    min-height: 100vh;
   }
+}
+
+@layer utilities {
+  .custom-scrollbar::-webkit-scrollbar {
+    width: 6px;
+  }
+  .custom-scrollbar::-webkit-scrollbar-track {
+    @apply bg-transparent;
+  }
+  .custom-scrollbar::-webkit-scrollbar-thumb {
+    @apply bg-slate-800 rounded-full hover:bg-slate-700 transition-colors;
+  }
+
+  .glass-panel {
+    @apply bg-slate-900/50 backdrop-blur-xl border border-slate-800 shadow-2xl;
+  }
+
+  /* Right-to-Left optimization for Arabic */
+  [dir="rtl"] {
+    font-family: 'Cairo', sans-serif !important;
+  }
+}
+
+/* Better focus states */
+:focus-visible {
+  @apply outline-none ring-2 ring-blue-500 ring-offset-2 ring-offset-slate-950;
+}
+
+/* Prevent layout shifts and improve mobile feel */
+* {
+  box-sizing: border-box;
+  -webkit-tap-highlight-color: transparent;
+}
+
+html {
+  scroll-behavior: smooth;
+  height: -webkit-fill-available;
+}
+
+body {
+  min-height: 100vh;
+  min-height: -webkit-fill-available;
 }

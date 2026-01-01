@@ -1,6 +1,8 @@
 import { useState, useEffect, useRef } from 'react';
 import { Play, Pause, RotateCw, Settings, Coffee, Brain, Maximize2, Minimize2, ChevronDown, ChevronUp } from 'lucide-react';
 import { useLocalStorage } from '../hooks/useLocalStorage';
+import { supabase } from '../lib/supabase';
+import { useAuth } from '../context/AuthContext';
 import { twMerge } from 'tailwind-merge';
 
 type TimerMode = 'work' | 'break';
@@ -14,12 +16,15 @@ const COLORS = [
 ];
 
 export default function PomodoroTimer() {
-  const [workDuration, setWorkDuration] = useLocalStorage('pomodoro-work', 25);
-  const [breakDuration, setBreakDuration] = useLocalStorage('pomodoro-break', 5);
-  const [accentColorId, setAccentColorId] = useLocalStorage('pomodoro-color', 'blue');
+  const { user } = useAuth();
+  const [workDuration, setWorkDuration] = useState(25);
+  const [breakDuration, setBreakDuration] = useState(5);
+  const [accentColorId, setAccentColorId] = useState('blue');
+  const [dbLoading, setDbLoading] = useState(true);
+
   const [pos, setPos] = useLocalStorage('pomodoro-pos', { x: 24, y: 24 });
   
-  // Persistence states
+  // Persistence states (Keep in localStorage for immediate state on refresh)
   const [mode, setMode] = useLocalStorage<TimerMode>('pomodoro-mode', 'work');
   const [isActive, setIsActive] = useLocalStorage('pomodoro-active', false);
   const [targetEndTime, setTargetEndTime] = useLocalStorage<number | null>('pomodoro-target', null);
@@ -35,6 +40,35 @@ export default function PomodoroTimer() {
   const timerRef = useRef<HTMLDivElement>(null);
 
   const accentColor = COLORS.find(c => c.id === accentColorId) || COLORS[0];
+
+  // Fetch settings from Supabase
+  useEffect(() => {
+    if (user) {
+      const fetchSettings = async () => {
+        try {
+          const { data, error } = await supabase
+            .from('profiles')
+            .select('pomodoro_settings')
+            .eq('id', user.id)
+            .single();
+
+          if (error) throw error;
+
+          if (data?.pomodoro_settings) {
+            setWorkDuration(data.pomodoro_settings.work);
+            setBreakDuration(data.pomodoro_settings.break);
+            setAccentColorId(data.pomodoro_settings.color);
+          }
+        } catch (err) {
+          console.error('Error fetching pomodoro settings:', err);
+        } finally {
+          setDbLoading(false);
+        }
+      };
+
+      fetchSettings();
+    }
+  }, [user]);
 
   // Synchronize internal timeLeft with targetEndTime or remainingWhenPaused
   useEffect(() => {
@@ -101,7 +135,12 @@ export default function PomodoroTimer() {
     setTimeLeft(duration);
   };
 
-  // ... rest of the component remains similar in UI structure ...
+  const saveToSupabase = async (work: number, breakD: number, color: string) => {
+    if (!user) return;
+    await supabase.from('profiles').update({
+      pomodoro_settings: { work, break: breakD, color }
+    }).eq('id', user.id);
+  };
 
   // Handle Dragging
   useEffect(() => {
@@ -140,10 +179,10 @@ export default function PomodoroTimer() {
     };
   };
 
-
-
   const minutes = Math.floor(timeLeft / 60);
   const seconds = timeLeft % 60;
+
+  if (dbLoading) return null;
 
   return (
     <>
@@ -300,7 +339,11 @@ export default function PomodoroTimer() {
                           <input 
                               type="range" min="1" max="60" 
                               value={workDuration} 
-                              onChange={(e) => setWorkDuration(parseInt(e.target.value))}
+                              onChange={(e) => {
+                                const val = parseInt(e.target.value);
+                                setWorkDuration(val);
+                                saveToSupabase(val, breakDuration, accentColorId);
+                              }}
                               className={twMerge("w-full h-1.5 bg-slate-800 rounded-full appearance-none cursor-pointer", accentColor.bg)}
                           />
                       </div>
@@ -313,7 +356,11 @@ export default function PomodoroTimer() {
                           <input 
                               type="range" min="1" max="30" 
                               value={breakDuration} 
-                              onChange={(e) => setBreakDuration(parseInt(e.target.value))}
+                              onChange={(e) => {
+                                const val = parseInt(e.target.value);
+                                setBreakDuration(val);
+                                saveToSupabase(workDuration, val, accentColorId);
+                              }}
                               className="w-full h-1.5 bg-slate-800 rounded-full appearance-none cursor-pointer accent-emerald-500"
                           />
                       </div>
@@ -324,7 +371,10 @@ export default function PomodoroTimer() {
                             {COLORS.map(c => (
                               <button
                                 key={c.id}
-                                onClick={() => setAccentColorId(c.id)}
+                                onClick={() => {
+                                  setAccentColorId(c.id);
+                                  saveToSupabase(workDuration, breakDuration, c.id);
+                                }}
                                 className={twMerge(
                                   "aspect-square rounded-2xl border-4 transition-all transform hover:scale-110 active:scale-90 shadow-lg",
                                   c.bg,
@@ -339,7 +389,7 @@ export default function PomodoroTimer() {
                       <button 
                           onClick={() => setShowSettings(false)}
                           className={twMerge(
-                            "w-full py-4 rounded-[1.5rem] text-sm font-bold transition-all border",
+                            "w-full py-4 rounded-[1.5rem] text-sm font-bold transition-all border shadow-lg active:scale-95",
                             "bg-slate-800/50 text-slate-300 border-slate-700 hover:bg-slate-800 hover:text-white"
                           )}
                       >
@@ -374,7 +424,7 @@ export default function PomodoroTimer() {
                           </button>
                           <button 
                               onClick={resetTimer}
-                              className="flex-1 flex items-center justify-center bg-slate-800/50 text-slate-400 hover:text-slate-100 rounded-[2rem] hover:bg-slate-800 transition-all active:rotate-180 duration-700 border border-slate-700/50"
+                              className="flex-1 flex items-center justify-center bg-slate-800/50 text-slate-400 hover:text-slate-100 rounded-[2rem] hover:bg-slate-800 transition-all active:rotate-180 duration-700 border border-slate-700/50 shadow-inner"
                               title="إعادة ضبط"
                           >
                               <RotateCw className="w-6 h-6" />
@@ -382,10 +432,10 @@ export default function PomodoroTimer() {
                       </div>
 
                       {/* Spacious Progress Bar */}
-                      <div className="relative h-2.5 bg-slate-800/50 rounded-full overflow-hidden border border-slate-700/30">
+                      <div className="relative h-2.5 bg-slate-800/50 rounded-full overflow-hidden border border-slate-700/30 shadow-inner">
                           <div 
                               className={twMerge(
-                                "absolute inset-y-0 left-0 transition-all duration-1000",
+                                "absolute inset-y-0 left-0 transition-all duration-1000 shadow-[0_0_10px_rgba(255,255,255,0.2)]",
                                 mode === 'work' ? accentColor.bg : 'bg-emerald-500'
                               )}
                               style={{ width: `${(timeLeft / (mode === 'work' ? workDuration * 60 : breakDuration * 60)) * 100}%` }}

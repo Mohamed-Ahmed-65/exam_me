@@ -7,6 +7,7 @@ import SubTasksView from './components/SubTasksView';
 import PomodoroTimer from './components/PomodoroTimer';
 import Auth from './components/Auth';
 import BrainDump from './components/BrainDump';
+import ThemeSelector from './components/ThemeSelector';
 import { useAuth } from './context/AuthContext';
 import { LogOut, Loader2, Brain, X } from 'lucide-react';
 import { twMerge } from 'tailwind-merge';
@@ -31,7 +32,7 @@ function App() {
         try {
           const { data, error } = await supabase
             .from('profiles')
-            .select('selected_stream')
+            .select('selected_stream, theme_preference')
             .eq('id', user.id)
             .maybeSingle();
 
@@ -44,7 +45,8 @@ function App() {
             // 1. Initialize profile
             await supabase.from('profiles').insert({ 
               id: user.id,
-              country: user.user_metadata?.country || 'Unknown'
+              country: user.user_metadata?.country || 'Unknown',
+              theme_preference: localStorage.getItem('app-theme') || 'sapphire'
             });
 
             // 2. Migrate Tags
@@ -91,6 +93,14 @@ function App() {
             setStream(null);
           } else {
             setStream(data.selected_stream as Stream);
+            if (data.theme_preference) {
+              localStorage.setItem('app-theme', data.theme_preference);
+              if (data.theme_preference === 'sapphire') {
+                document.documentElement.removeAttribute('data-theme');
+              } else {
+                document.documentElement.setAttribute('data-theme', data.theme_preference);
+              }
+            }
           }
         } catch (err) {
           console.error('Error in profile/migration init:', err);
@@ -190,6 +200,7 @@ function App() {
         />
       )}
 
+      <ThemeSelector />
       <PomodoroTimer />
     </div>
   );

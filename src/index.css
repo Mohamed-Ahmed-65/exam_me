@@ -1,7 +1,52 @@
 @import "tailwindcss";
 
+:root {
+  --brand-solid: #3b82f6;
+  --brand-muted: rgba(59, 130, 246, 0.1);
+  --brand-border: rgba(59, 130, 246, 0.2);
+  --brand-glow: rgba(59, 130, 246, 0.3);
+}
+
+[data-theme='amethyst'] {
+  --brand-solid: #8b5cf6;
+  --brand-muted: rgba(139, 92, 246, 0.1);
+  --brand-border: rgba(139, 92, 246, 0.2);
+  --brand-glow: rgba(139, 92, 246, 0.3);
+}
+
+[data-theme='emerald'] {
+  --brand-solid: #10b981;
+  --brand-muted: rgba(16, 185, 129, 0.1);
+  --brand-border: rgba(16, 185, 129, 0.2);
+  --brand-glow: rgba(16, 185, 129, 0.3);
+}
+
+[data-theme='rose'] {
+  --brand-solid: #f43f5e;
+  --brand-muted: rgba(244, 63, 94, 0.1);
+  --brand-border: rgba(244, 63, 94, 0.2);
+  --brand-glow: rgba(244, 63, 94, 0.3);
+}
+
+[data-theme='amber'] {
+  --brand-solid: #f59e0b;
+  --brand-muted: rgba(245, 158, 11, 0.1);
+  --brand-border: rgba(245, 158, 11, 0.2);
+  --brand-glow: rgba(245, 158, 11, 0.3);
+}
+
 @theme {
   --font-sans: 'Cairo', sans-serif;
+  --color-brand: var(--brand-solid);
+  --color-brand-muted: var(--brand-muted);
+  --color-brand-border: var(--brand-border);
+  --color-brand-glow: var(--brand-glow);
+  
+  /* Alias blue to brand for global theme effect */
+  --color-blue-400: var(--brand-solid);
+  --color-blue-500: var(--brand-solid);
+  --color-blue-600: var(--brand-solid);
+  --color-indigo-600: var(--brand-solid);
 }
 
 /* Custom utilities if needed, or layer utilities */
@@ -39,10 +84,37 @@
   @apply outline-none ring-2 ring-blue-500 ring-offset-2 ring-offset-slate-950;
 }
 
+/* Premium Transitions & Animations */
+@layer utilities {
+  .hover-lift {
+    @apply transition-all duration-300 hover:-translate-y-1 hover:shadow-xl hover:shadow-blue-500/10 active:scale-[0.98];
+  }
+}
+
+@keyframes bounce-slow {
+  0%, 100% {
+    transform: translateY(-5%);
+    animation-timing-function: cubic-bezier(0.8, 0, 1, 1);
+  }
+  50% {
+    transform: translateY(0);
+    animation-timing-function: cubic-bezier(0, 0, 0.2, 1);
+  }
+}
+
+.animate-bounce-slow {
+  animation: bounce-slow 3s infinite;
+}
+
 /* Prevent layout shifts and improve mobile feel */
 * {
   box-sizing: border-box;
   -webkit-tap-highlight-color: transparent;
+  transition: background-color 0.2s ease, border-color 0.2s ease, transform 0.2s ease;
+}
+
+button, a {
+  @apply transition-all duration-200 active:scale-95;
 }
 
 html {

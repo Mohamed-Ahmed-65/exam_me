@@ -90,6 +90,22 @@ function App() {
               await supabase.from('exam_subtasks').insert(subtaskEntries);
             }
             
+            // 5. Migrate Exam Progress
+            const localExamProgress = JSON.parse(localStorage.getItem('exam-progress') || '{}');
+            const progressEntries: any[] = [];
+            Object.entries(localExamProgress).forEach(([examId, data]: [string, any]) => {
+              progressEntries.push({
+                user_id: user.id,
+                exam_id: examId,
+                review: !!data.review,
+                past_papers: !!data.pastPapers,
+                night_revision: !!data.nightRevision
+              });
+            });
+            if (progressEntries.length) {
+              await supabase.from('exam_progress').insert(progressEntries);
+            }
+            
             setStream(null);
           } else {
             setStream(data.selected_stream as Stream);

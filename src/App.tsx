@@ -6,11 +6,12 @@ import Dashboard from './components/Dashboard';
 import SubTasksView from './components/SubTasksView';
 import PomodoroTimer from './components/PomodoroTimer';
 import Auth from './components/Auth';
-import BrainDump from './components/BrainDump';
 import ThemeSelector from './components/ThemeSelector';
+import TaskManager from './components/TaskManager';
 import { useAuth } from './context/AuthContext';
 import { LogOut, Loader2, Brain, X } from 'lucide-react';
 import { twMerge } from 'tailwind-merge';
+import { AnimatePresence, motion } from 'framer-motion';
 
 function App() {
   const { user, loading: authLoading, signOut } = useAuth();
@@ -201,20 +202,35 @@ function App() {
       </main>
 
       {/* Right Sidebar (Brain Dump) */}
-      <aside className={twMerge(
-        "fixed inset-y-0 right-0 z-40 w-[85%] sm:w-[50%] lg:w-[350px] xl:w-[400px] transition-transform duration-500 transform lg:translate-x-0",
-        isBrainDumpOpen ? "translate-x-0" : "translate-x-full"
-      )}>
-        <BrainDump />
-      </aside>
+      {/* Right Sidebar (Task Manager) */}
+      <AnimatePresence mode="wait">
+        {(isBrainDumpOpen || window.innerWidth >= 1024) && (
+            <motion.aside 
+                key="sidebar"
+                initial={{ x: '100%' }}
+                animate={{ x: 0 }}
+                exit={{ x: '100%' }}
+                transition={{ type: 'spring', damping: 25, stiffness: 200 }}
+                className={twMerge(
+                  "fixed inset-y-0 right-0 z-[150] w-[85%] sm:w-[50%] lg:w-[350px] xl:w-[400px] transition-transform duration-500 transform bg-slate-900 border-l border-slate-800 lg:translate-x-0",
+                  isBrainDumpOpen ? "translate-x-0" : "translate-x-full"
+                )}
+            >
+                <TaskManager />
+            </motion.aside>
+        )}
+      </AnimatePresence>
 
       {/* Overlay for mobile Brain Dump */}
-      {isBrainDumpOpen && (
-        <div 
-          className="fixed inset-0 bg-slate-950/60 backdrop-blur-sm z-30 lg:hidden"
-          onClick={() => setIsBrainDumpOpen(false)}
-        />
-      )}
+      <AnimatePresence>
+        {isBrainDumpOpen && (
+            <motion.div 
+            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-slate-950/60 backdrop-blur-sm z-[140] lg:hidden"
+            onClick={() => setIsBrainDumpOpen(false)}
+            />
+        )}
+      </AnimatePresence>
 
       <ThemeSelector />
       <PomodoroTimer />

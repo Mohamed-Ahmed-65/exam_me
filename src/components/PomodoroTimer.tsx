@@ -124,7 +124,7 @@ export default function PomodoroTimer() {
       {/* Main Dock Container */}
       <div 
         className={twMerge(
-          "fixed bottom-6 z-[100] transition-all duration-500 ease-[cubic-bezier(0.23,1,0.32,1)]",
+          "fixed bottom-6 z-[200] transition-all duration-500 ease-[cubic-bezier(0.23,1,0.32,1)]",
           isExpanded 
             ? "right-1/2 translate-x-1/2 bottom-1/2 translate-y-1/2 w-[90%] max-w-sm" // Centered on screen
             : "right-6 w-auto" // Bottom Right Dock

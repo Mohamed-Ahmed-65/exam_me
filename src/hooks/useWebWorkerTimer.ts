@@ -1,57 +1,54 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 
-type TimerMode = 'work' | 'break';
-
 export function useWebWorkerTimer(
   initialDuration: number, 
   onComplete?: () => void
 ) {
   const [timeLeft, setTimeLeft] = useState(initialDuration);
   const [isActive, setIsActive] = useState(false);
-  const workerRef = useRef<Worker | null>(null);
+  const endTimeRef = useRef<number | null>(null);
 
   useEffect(() => {
-    // Initialize Worker
-    workerRef.current = new Worker(new URL('../workers/timer.worker.ts', import.meta.url), { type: 'module' });
+    let interval: number;
 
-    workerRef.current.onmessage = (e) => {
-      const { type, timeLeft: remaining } = e.data;
-      
-      switch (type) {
-        case 'TICK':
-          setTimeLeft(remaining);
-          break;
-        case 'COMPLETE':
+    if (isActive && endTimeRef.current) {
+      interval = window.setInterval(() => {
+        const now = Date.now();
+        const remaining = Math.ceil((endTimeRef.current! - now) / 1000);
+        
+        if (remaining <= 0) {
+          setTimeLeft(0);
           setIsActive(false);
+          endTimeRef.current = null;
           if (onComplete) onComplete();
-          break;
-      }
-    };
+        } else {
+          setTimeLeft(remaining);
+        }
+      }, 200);
+    }
 
-    return () => {
-      workerRef.current?.terminate();
-    };
-  }, [onComplete]);
+    return () => clearInterval(interval);
+  }, [isActive, onComplete]);
 
   const start = useCallback((duration?: number) => {
-    if (!workerRef.current) return;
-    setIsActive(true);
-    // If starting fresh, allow passing custom duration (for mode changes)
+    // If a specific duration is passed (e.g. switching modes), use it.
+    // Otherwise use current timeLeft.
     const timeToRun = duration !== undefined ? duration : timeLeft;
-    workerRef.current.postMessage({ type: 'START', payload: { duration: timeToRun } });
+    
+    setTimeLeft(timeToRun); // Immediate UI update
+    endTimeRef.current = Date.now() + timeToRun * 1000;
+    setIsActive(true);
   }, [timeLeft]);
 
   const pause = useCallback(() => {
-    if (!workerRef.current) return;
     setIsActive(false);
-    workerRef.current.postMessage({ type: 'PAUSE' });
+    endTimeRef.current = null;
   }, []);
 
   const reset = useCallback((newDuration: number) => {
-    if (!workerRef.current) return;
     setIsActive(false);
+    endTimeRef.current = null;
     setTimeLeft(newDuration);
-    workerRef.current.postMessage({ type: 'RESET' });
   }, []);
 
   return { timeLeft, isActive, start, pause, reset, setTimeLeft };

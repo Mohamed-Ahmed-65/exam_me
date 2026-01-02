@@ -1,11 +1,11 @@
 import { useState, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
-  Plus, Calendar, Flag, Tag, Trash2, CheckCircle2, 
-  Circle, Clock, Filter, ChevronDown, Check, X, ArrowUp, Pencil
+  Plus, Flag, Trash2, CheckCircle2, 
+  Clock, Check, X, ArrowUp, Pencil
 } from 'lucide-react';
 import CustomDatePicker from './CustomDatePicker';
-import { format, isToday, isTomorrow, isPast } from 'date-fns';
+import { format, isToday, isPast } from 'date-fns';
 import { arEG } from 'date-fns/locale';
 import { twMerge } from 'tailwind-merge';
 import { supabase } from '../lib/supabase';

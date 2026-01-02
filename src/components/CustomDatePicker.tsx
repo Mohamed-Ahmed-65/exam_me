@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { 
   format, addMonths, subMonths, startOfMonth, endOfMonth, 
   startOfWeek, endOfWeek, eachDayOfInterval, isSameMonth, 
@@ -6,7 +6,7 @@ import {
 } from 'date-fns';
 import { arEG } from 'date-fns/locale';
 import { ChevronRight, ChevronLeft, Calendar as CalendarIcon } from 'lucide-react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion } from 'framer-motion';
 import { twMerge } from 'tailwind-merge';
 
 interface CustomDatePickerProps {

@@ -1,5 +1,5 @@
-import { useState, useEffect, useRef } from 'react';
-import { Play, Pause, RotateCw, Settings, Coffee, Brain, ChevronUp, ChevronDown, Check } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { Play, Pause, RotateCw, Settings, Coffee, Brain, ChevronDown, Check } from 'lucide-react';
 import { useWebWorkerTimer } from '../hooks/useWebWorkerTimer';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../context/AuthContext';
